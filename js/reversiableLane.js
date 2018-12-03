@@ -1,8 +1,10 @@
 var reversibleLane = {
     settings : {
+        showStatus : true, //是否显示路况
         canvasId : '',
         padding : 50,
-        laneGap : 10,
+        laneGap : 15,
+        arrowWidth : 20,
         color : {
             background : '#212121',
             viewport : '#343232',
@@ -11,8 +13,8 @@ var reversibleLane = {
             clear : '#4caf50',
             lane : '#7986cb',
             normal : '#ffd54f',
-            congest : '#f44336',
-            saturation : '#7986cb',
+            slow : '#ec7034',
+            congest : '#e3362a',
             flow : '#fff',
         },
         errorType : {
@@ -23,26 +25,11 @@ var reversibleLane = {
     el : {},
     data : {},
 
-    getCenterAxis : function(trafficData){
-        var CENTER_AXIS = this.getCanvasWidth() / 2;
-        var offsetWidth = ( this.getCanvasWidth() - this.getPadding() * 2 ) / 8;
-        var offset = 0;
-        trafficData.forEach(function(el, i){
-            if(el.direction === 'west'){
-                offset = offset + 1;
-            }
-            if(el.direction === 'east'){
-                offset = offset - 1;
-            }
-        });
-        CENTER_AXIS = CENTER_AXIS + offset * offsetWidth;
-        return CENTER_AXIS;
-    },
-
     draw : function(){
         this.drawViewport();
-        this.drawLegend();
+        this.settings.showStatus && this.drawLegend();
         this.drawTrafficStatus();
+        this.drawCycleText();
         this.drawFrameBorder();
     },
 
@@ -102,26 +89,43 @@ var reversibleLane = {
         canvas.add(chartBackground);
     },
 
+    drawCycleText : function(){
+        var str = this.settings.updateCycle;
+        if(str && typeof str == 'string' ){
+            var startX = this.getPadding() + 14;
+            var t = new zrender.Text({
+                style : {
+                    text: '周期 ' +　reversibleLane.settings.updateCycle,
+                    fontSize : 13,
+                    opacity : 0.6,
+                    textFill : reversibleLane.settings.color.flow,
+                },
+                position: [startX, startX]
+            });
+            this.el.canvas.add(t)
+        }
+    },
+
     drawLegend : function(){
         var lengend = [
             {
                 text : '畅通',
                 color :　reversibleLane.settings.color.clear
             },{
-                text : '拥堵',
+                text : '缓行',
                 color :　reversibleLane.settings.color.normal
+            },{
+                text : '拥堵',
+                color :　reversibleLane.settings.color.slow
             },{
                 text : '非常拥堵',
                 color :　reversibleLane.settings.color.congest
-            },{
-                text : '饱和度',
-                color :　reversibleLane.settings.color.saturation
             }
         ];
 
         var p = this.getPadding();
         var w = this.getGraphWidth();
-        var y  = this.getCanvasHeight() - p;
+        var y  = this.getCanvasHeight() - p + 6;
 
         lengend.forEach(function(el, i){
             var label = new zrender.Circle({
@@ -146,130 +150,174 @@ var reversibleLane = {
     },
 
     drawTrafficStatus : function(){
-
-        var hasAllDirection = this.settings.trafficData.length === 3 ? true : false;
         
         this.data.forDraw.forEach(function(el){
 
-            var saturationCircle = reversibleLane.drawSaturation(el);
-            var lane = reversibleLane.drawLane(el, saturationCircle.shape);
-            var congestion = reversibleLane.drawCongestion(el, saturationCircle.shape);
-
-            reversibleLane.el.canvas.add(congestion);
+            var arrow = reversibleLane.drawArrow(el);
+            var lane = reversibleLane.drawLane(el, arrow.shape);
+            var text = reversibleLane.drawFlowAndCongestion(el, arrow.shape);
+            
+            if(reversibleLane.settings.showStatus){
+                var congestion = reversibleLane.drawCongestion(el, arrow.shape);
+                reversibleLane.el.canvas.add(congestion);
+            }
+            
+            reversibleLane.el.canvas.add(arrow.group);
             reversibleLane.el.canvas.add(lane);
-            reversibleLane.el.canvas.add(saturationCircle);
+            reversibleLane.el.canvas.add(text)
 
         });
     },
 
-    drawSaturation : function(laneData){
+    drawArrow : function(laneData){
 
-        var saturationCX;
-        var saturationCY;
-        //var saturationR = (this.getMaxLaneWidth() + this.settings.laneGap) /2 ;
-        var saturationR = laneData.width / 2 + this.settings.laneGap *1.2 ;
-
+        var g = new zrender.Group();
         var p = this.getPadding();
         var w = this.getGraphWidth();
         var h = this.getGraphHeight();
+        var l = (this.getGraphShortSideLength() - this.settings.padding * 2) * 0.2;
+        var x, y, maskX, maskY, rad;
 
         switch(laneData.direction){
-            case 'west' : {
-                saturationCX = ( p + laneData.startX ) / 2 + reversibleLane.settings.laneGap;
-                saturationCY = p + h * 0.6;
+
+            case 'west': {
+                x = ( p + laneData.startX ) / 2 - laneData.width / 2;
+                y = p + h * 0.65;
+                maskX = x + reversibleLane.settings.arrowWidth;
+                maskY = y;
+                rad = Math.PI / 180 * 45;
                 break;
             }
-            case 'east' : {
-                saturationCX = ( laneData.startX + laneData.width + w + p ) / 2 - reversibleLane.settings.laneGap;
-                saturationCY = p + h * 0.45;
+
+            case 'east': {
+                x = ( laneData.startX + laneData.width + w + p ) / 2 + laneData.width / 2;
+                y = p + h * 0.55;
+                maskX = x - reversibleLane.settings.arrowWidth;
+                maskY = y;
+                rad = Math.PI / 180 * -135;
                 break;
             }
-            case 'north' : {
-                saturationCX = reversibleLane.data.CENTER_AXIS;
-                saturationCY = p + h * 0.25;
-                break;
+
+            default: {
+                x = reversibleLane.data.CENTER_AXIS;
+                y = p + h * 0.15;
+                maskX = x;
+                maskY = y + reversibleLane.settings.arrowWidth;
+                rad = Math.PI / 180 * -45;
             }
-            default : {
-                throw reversibleLane.settings.errorType.direction
-            }
+
         }
 
-        var saturation = new zrender.Circle({
+
+        var bottomRect = new zrender.Rect({
+            rotation : rad,
+            origin: [x, y],
             shape : {
-                cx : saturationCX,
-                cy : saturationCY,
-                r : saturationR,
+                x : x,
+                y : y,
+                width : l,
+                height : l
             },
             style : {
-                fill : reversibleLane.settings.color.viewport,
-                stroke : reversibleLane.settings.color.lane,
-                lineWidth : parseInt(saturationR / 3 ),
-                shadowColor : reversibleLane.settings.color.border,
-                shadowBlur : 8,
-                shadowOffsetY : 2,
-                text : laneData.saturation.toFixed(2),
-                fontFamily : 'Arial',
-                fontSize :  parseInt( saturationR / 1.8 ),
-                textFill : reversibleLane.settings.color.lane,
-                textShadowColor : reversibleLane.settings.color.border,
-                textShadowBlur : 4,
-                textShadowOffsetY : 1,
+                fill : reversibleLane.settings.color.lane
             }
         });
 
-        return saturation;
-    },
-
-    getMaxLaneWidth : function(){
-        var maxWidth = 0;
-        this.data.forDraw.forEach(function(el){
-            if(el.width > maxWidth){
-                maxWidth = el.width;
+        var topRect = new zrender.Rect({
+            rotation : rad,
+            origin: [maskX, maskY],
+            shape : {
+                x : maskX,
+                y : maskY,
+                width : l,
+                height : l
+            },
+            style : {
+                fill : reversibleLane.settings.color.viewport
             }
         });
-        return maxWidth;
+
+        var topCover = new zrender.Rect({
+            rotation : rad,
+            origin: [x, y],
+            shape : {
+                x : x,
+                y : y,
+                width : laneData.width / 1.41,
+                height : laneData.width / 1.41
+            },
+            style : {
+                fill : reversibleLane.settings.color.lane
+            }
+        });
+
+        var bottomCover = new zrender.Rect({ //模拟border
+            rotation : rad,
+            origin: [x, y],
+            shape : {
+                x : x - 10,
+                y : y - 10,
+                width : l,
+                height : l
+            },
+            style : {
+                fill : reversibleLane.settings.color.viewport
+            }
+        });
+        g.add(bottomCover);
+        g.add(bottomRect);
+        g.add(topRect);
+        g.add(topCover);
+
+        return {
+            group : g,
+            shape : {
+                x: x,
+                y: y
+            }
+        };
     },
 
     drawLane : function(laneData, shape){
-
-        var laneStartY = shape.cy - laneData.width / 2;
+        var offset = laneData.width / 2;
+        var laneStartY = shape.y - offset;
         var laneEndY = reversibleLane.getPadding() + reversibleLane.getGraphHeight();
         var pointsArray, textOffsetX, fontSize;
 
         switch(laneData.direction){
             case 'west' : {
                 pointsArray = [
-                    [shape.cx, laneStartY],
+                    [shape.x + offset, laneStartY],
                     [laneData.startX + laneData.width, laneStartY],
                     [laneData.startX + laneData.width, laneEndY],
                     [laneData.startX, laneEndY],
                     [laneData.startX, laneStartY + laneData.width],
-                    [shape.cx, laneStartY + laneData.width],
-                    [shape.cx, laneStartY]
+                    [shape.x + offset, laneStartY + laneData.width],
+                    [shape.x + offset, laneStartY]
                 ];
-                textOffsetX = (laneData.startX - shape.cx ) / 2;
+                textOffsetX = (laneData.startX - shape.x ) / 2;
                 break;
             }
             case 'east' : {
                 pointsArray = [
-                    [shape.cx, laneStartY],
+                    [shape.x - offset, laneStartY],
                     [laneData.startX, laneStartY],
                     [laneData.startX, laneEndY],
                     [laneData.startX + laneData.width, laneEndY],
                     [laneData.startX + laneData.width, laneStartY + laneData.width],
-                    [shape.cx, laneStartY + laneData.width],
-                    [shape.cx, laneStartY]
+                    [shape.x - offset, laneStartY + laneData.width],
+                    [shape.x - offset, laneStartY]
                 ];
-                textOffsetX = - ( shape.cx - laneData.startX - laneData.width ) / 2;
+                textOffsetX = - ( shape.x - laneData.startX - laneData.width ) / 2;
                 break;
             }
             case 'north' : {
                 pointsArray = [
-                    [shape.cx - laneData.width / 2, shape.cy],
-                    [shape.cx + laneData.width / 2, shape.cy],
-                    [shape.cx + laneData.width / 2, laneEndY],
-                    [shape.cx - laneData.width / 2, laneEndY],
-                    [shape.cx - laneData.width / 2, shape.cy]
+                    [shape.x - laneData.width / 2, shape.y + offset],
+                    [shape.x + laneData.width / 2, shape.y + offset],
+                    [shape.x + laneData.width / 2, laneEndY],
+                    [shape.x - laneData.width / 2, laneEndY],
+                    [shape.x - laneData.width / 2, shape.y + offset]
                 ];
                 textOffsetX = 0;
                 break;
@@ -287,25 +335,146 @@ var reversibleLane = {
             style : {
                 stroke : 'transparent',
                 fill : reversibleLane.settings.color.lane,
-                shadowColor : reversibleLane.settings.color.border,
-                shadowBlur : 10,
-                shadowOffsetY : 2,
-                text : laneData.flow + ' 辆',
-                textFill : reversibleLane.settings.color.flow,
-                textPosition : 'bottom',
-                textRotation : -90 * Math.PI / 180,
-                textVerticalAlign : 'middle',
-                textOffset : [textOffsetX, 0],
-                textAlign : 'right',
-                textDistance : -15,
-                fontSize : laneData.width * 0.7 > 24? 24 : parseInt(laneData.width * 0.7),
-                textShadowColor : reversibleLane.settings.color.border,
-                textShadowBlur : 3,
-                textShadowOffsetY : 1,
             }
         });
 
         return lane;
+    },
+
+    _createVerticalText : function(str, opt){
+        var g = new zrender.Group();
+        var x = opt.position[0];
+        var y = opt.position[1];
+        str.split('').forEach(function(el, i){
+            opt.style.text = el;
+            opt.position = [x, y + i*opt.style.fontSize];
+            var t = new zrender.Text(opt);
+            g.add(t);
+        });
+        return g;
+    },
+
+    _createHorizontalText : function(opt){
+        return new zrender.Text(opt)
+    },
+
+    drawFlowAndCongestion : function(laneData, shape){
+        console.log(laneData)
+        var g = new zrender.Group();
+        var w = laneData.width;
+        var bottomY = this.getGraphHeight() + this.getPadding();
+        var fs = parseInt(w / 3);
+        var satTextWidth = fs*3;
+        var flowTextWidth = fs*2;
+        var satText, satNum, flowText, flowNum;
+
+        switch (laneData.direction){
+            case 'west' : {
+                satText = reversibleLane._createHorizontalText({
+                    style: {
+                        text : '饱和度',
+                        fontSize : fs,
+                        fontWeight : 'bold',
+                        textAlign : 'left',
+                        textFill : reversibleLane.settings.color.viewport,
+                    },
+                    position: [shape.x + w / 2, shape.y - fs / 2],
+                });
+
+                satNum = reversibleLane._createHorizontalText({
+                    style: {
+                        text : laneData.saturation,
+                        fontSize : fs,
+                        //fontWeight : 'bold',
+                        textFill : reversibleLane.settings.color.flow,
+                    },
+                    position: [shape.x + w / 2 + satTextWidth + 8 , shape.y - fs / 2],
+                });
+
+                break;
+            }
+            case 'east' : {
+                satText = reversibleLane._createHorizontalText({
+                    style: {
+                        text : '饱和度',
+                        fontSize : fs,
+                        fontWeight : 'bold',
+                        textAlign : 'right',
+                        textFill : reversibleLane.settings.color.viewport,
+                    },
+                    position: [shape.x - w / 2, shape.y - fs / 2],
+                });
+
+                satNum = reversibleLane._createHorizontalText({
+                    style: {
+                        text : laneData.saturation,
+                        fontSize : fs,
+                        //fontWeight : 'bold',
+                        textAlign : 'right',
+                        textFill : reversibleLane.settings.color.flow,
+                    },
+                    position: [shape.x - w / 2 - satTextWidth - 8 , shape.y - fs / 2],
+                });
+
+                break
+            }
+            default : {
+                satX = shape.x + w / 2;
+                satY = shape.y - fs / 2;
+                ta = 'left';
+                satText = reversibleLane._createVerticalText('饱和度', {
+                    style: {
+                        fontSize : fs,
+                        fontWeight : 'bold',
+                        textAlign : 'right',
+                        textFill : reversibleLane.settings.color.viewport,
+                    },
+                    position: [shape.x + fs/2, shape.y + w / 2],
+                });
+
+                satNum = reversibleLane._createHorizontalText({
+                    style: {
+                        text : laneData.saturation,
+                        fontSize : fs,
+                        //fontWeight : 'bold',
+                        textFill : reversibleLane.settings.color.flow,
+                    },
+                    position: [shape.x + fs/2, shape.y + w / 2 + satTextWidth + 8],
+                    rotation: Math.PI / 180 * -90,
+                });
+
+            }
+        }
+
+        var flowNum = reversibleLane._createHorizontalText({
+            style : {
+                text : laneData.flow,
+                fontSize : fs,
+                textAlign : 'right',
+                //fontWeight : 'bold',
+                textFill : reversibleLane.settings.color.flow,
+            },
+            position: [laneData.startX + (w+fs)/2, bottomY - 12],
+            rotation: Math.PI / 180 * -90,
+        });
+
+        console.log(flowNum.getBoundingRect())
+
+        var flowText = reversibleLane._createVerticalText( '流量', {
+            style : {
+                fontSize : fs,
+                textAlign : 'right',
+                fontWeight : 'bold',
+                textFill : reversibleLane.settings.color.viewport,
+            },
+            position: [laneData.startX + (w+fs)/2, bottomY - 12 - flowNum.getBoundingRect().width - flowTextWidth - 8],
+        });
+
+        g.add(satText);
+        g.add(satNum);
+        g.add(flowNum);
+        g.add(flowText);
+        return g;
     },
 
     drawCongestion : function(laneData, shape){
@@ -317,23 +486,23 @@ var reversibleLane = {
         switch (laneData.direction) {
             case 'west' : {
                 x = p;
-                y = shape.cy - laneData.width / 2;
-                w = shape.cx - p;
+                y = shape.y - laneData.width / 2;
+                w = shape.x - p + laneData.width / 2;
                 h = laneData.width;
                 break;
             }
             case 'east' : {
-                x = shape.cx;
-                y = shape.cy - laneData.width / 2;
-                w = reversibleLane.getCanvasWidth() - p - shape.cx;
+                x = shape.x - laneData.width / 2;
+                y = shape.y - laneData.width / 2;
+                w = reversibleLane.getCanvasWidth() - p - shape.x + laneData.width / 2;
                 h = laneData.width;
                 break;
             }
             case 'north' : {
-                x = shape.cx - laneData.width / 2;
+                x = shape.x - laneData.width / 2;
                 y = p;
                 w = laneData.width;
-                h = shape.cy - p;
+                h = shape.y - p  + laneData.width / 2;
                 break;
             }
             default : {
@@ -343,8 +512,8 @@ var reversibleLane = {
 
         var maskCircle = new zrender.Circle({
             shape : {
-                cx : shape.cx,
-                cy : shape.cy,
+                x : shape.x,
+                y : shape.y,
                 r : shape.r *1.3,
             },
             style : {
@@ -396,46 +565,40 @@ var reversibleLane = {
         this.setLaneStartX();
     },
 
+    getCenterAxis : function(trafficData){
+        var CENTER_AXIS = this.getCanvasWidth() / 2;
+        var offsetWidth = ( this.getCanvasWidth() - this.getPadding() * 2 ) / 8;
+        var offset = 0;
+        trafficData.forEach(function(el, i){
+            if(el.direction === 'west'){
+                offset = offset + 1;
+            }
+            if(el.direction === 'east'){
+                offset = offset - 1;
+            }
+        });
+        CENTER_AXIS = CENTER_AXIS + offset * offsetWidth;
+        return CENTER_AXIS;
+    },
+
+
     setGraphSize : function(){
         this.data.graphWidth = this.getCanvasWidth() - 2 * this.getPadding();
-        this.data.graphHeight = this.getCanvasHeight() - 2 * this.getPadding() - 25;
+        var h = this.getCanvasHeight() - 2 * this.getPadding();
+        this.data.graphHeight = this.settings.showStatus ? h - 15 : h;
     },
 
     setLaneWidth : function(){
-        var threshold = 3;
-        var widthArray = [];
-        var flowArray = [];
-        var trafficData = this.data.forDraw;
-        var MIN_LENGTH = this.getGraphShortSideLength();
-        var TOTAL_LANE_WIDTH = trafficData.length === 3 ? MIN_LENGTH / 4 : MIN_LENGTH / 5;
-
-        var max = parseInt(trafficData[0].flow);
-        var maxIndex = 0;
-        trafficData.forEach(function(el, i){
-            var flow = parseInt(el.flow);
-            if(flow > max ){
-                max = flow;
-                maxIndex = i;
-            }
-            flowArray.push(flow);
-        });
-
-        flowArray.forEach(function(el, i){
-            if(el * threshold < max){
-                flowArray[i] = parseInt(max / threshold);
-            }
-        });
-
-        var TOTAL_FLOW = this.getTotalFlow(flowArray);
-
-        flowArray.forEach(function(el, i){
-            reversibleLane.data.forDraw[i].width = parseInt(flowArray[i] / TOTAL_FLOW * TOTAL_LANE_WIDTH)
+        var computedLaneWidth = (reversibleLane.getGraphShortSideLength() - reversibleLane.settings.padding * 2) * 0.12;
+        var presetLaneWidth = reversibleLane.settings.laneWidth && parseInt(reversibleLane.settings.laneWidth);
+        var laneWidth = presetLaneWidth ? presetLaneWidth : computedLaneWidth;
+        reversibleLane.data.forDraw.forEach(function(el){
+            el.width = laneWidth;
         });
     },
 
     setLaneStartX : function(){
 
-        var northLaneWidth = this.getNorthLaneWidth();
         this.data.forDraw.forEach(function(el){
   
             switch(el.direction){
@@ -444,11 +607,11 @@ var reversibleLane = {
                     break;
                 }
                 case 'west' : {
-                    el.startX = reversibleLane.data.CENTER_AXIS - northLaneWidth / 2 - reversibleLane.settings.laneGap - el.width ;
+                    el.startX = reversibleLane.data.CENTER_AXIS - el.width / 2 - reversibleLane.settings.laneGap - el.width ;
                     break;
                 }
                 case 'east' : {
-                    el.startX = reversibleLane.data.CENTER_AXIS + northLaneWidth / 2 + reversibleLane.settings.laneGap ;
+                    el.startX = reversibleLane.data.CENTER_AXIS + el.width / 2 + reversibleLane.settings.laneGap ;
                     break;
                 }
                 default : {
@@ -458,16 +621,6 @@ var reversibleLane = {
             }
         });
 
-    },
-
-    getNorthLaneWidth : function(){
-        var northLaneWidth = 0;
-        this.data.forDraw.forEach(function(el){
-            if(el.direction === 'north'){
-                northLaneWidth = el.width;
-            }
-        });
-        return northLaneWidth;
     },
 
     getNorthLaneRatio : function(){
