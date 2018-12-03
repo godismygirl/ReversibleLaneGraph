@@ -1,7 +1,7 @@
 var opt = {
     canvasId : 'reversible-lane-graph',
     updateCycle : '11:00 ~ 11:15',
-    showStatus : false,
+    showStatus : true,
     trafficData : [
         {
             flow : 8202,
